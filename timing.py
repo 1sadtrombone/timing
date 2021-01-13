@@ -40,7 +40,7 @@ def get_isolated_ffts(data, chans, fi, ff, N=20000):
     un_raveled_chans = 4096
     ntap = 4
     ts = np.zeros(data.shape[0]*un_raveled_chans, dtype=np.float64)    
-
+    
     # work in chunks
     for i in range(data.shape[0]//N+1):
         # zfill unmentioned channels
@@ -84,7 +84,7 @@ if __name__ == "__main__":
     print("unpacked")
 
     skip = 0
-    n_samples = 40*10000
+    n_samples = 40*100
 
     pol0 = pol0[skip:n_samples+skip]
     pol1 = pol1[skip:n_samples+skip]
@@ -117,6 +117,9 @@ if __name__ == "__main__":
     pol0 = pol0.reshape((cpus,chunk_size,chans.size))
     pol1 = pol1.reshape((cpus,chunk_size,chans.size))
 
+    print(pol0.shape)
+    print(pol0[0].shape)
+
     for i in range(cpus):
         corr += pool.starmap_async(get_corr, [((pol0[i], pol1[i]), chans, fi, ff, ipfb_chunk) for x in pol0]).get()
 
@@ -131,4 +134,6 @@ if __name__ == "__main__":
     dt = 1/(250e6)
     ts = np.linspace(0,N*dt,N) - N/2*dt
 
-    np.save(f"$SCRATCH/timing_data/xcorr_lab_{n_samples}samples_parr", corr)
+    name = f"$SCRATCH/timing_data/xcorr_lab_{n_samples}samples_parr"
+    print(f"saving data at {name}")
+    np.save(name, corr)
