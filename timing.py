@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import albatrostools
 import read_4bit
 import pfb_helper as pfb
-from multiprocessing import Pool, set_start_method, get_context
+from multiprocessing import Pool, set_start_method, get_context, cpu_count
 
 import matplotlib as mpl
 mpl.rcParams['agg.path.chunksize'] = 10000
@@ -31,7 +31,7 @@ def get_isolated_ffts(data, chans, fi, ff, N=20000):
     """
     Get timestream of data if signal from fi to ff only is nonzero
     
-    - data: baseband data (which is PFBed)
+    - data: baseband data (which is PFBed). Works best if length is power of small primes
     - chans: frequency channels associated with this data
     - fi, ff: initial and final frequencies of the non-zero signal
     - N: chunk size for the IPFB computation
@@ -46,7 +46,6 @@ def get_isolated_ffts(data, chans, fi, ff, N=20000):
         # zfill unmentioned channels
 
         zfilled = np.zeros((min(N, pol0.shape[0]-i*N),2049), dtype=np.complex64)
-        print(zfilled[:,chans].shape, pol0[i*N:(i+1)*N].shape)
         if zfilled.shape[0] < ntap:
             continue
         zfilled[:,chans]=pol0[i*N:(i+1)*N]
@@ -54,14 +53,6 @@ def get_isolated_ffts(data, chans, fi, ff, N=20000):
         ts[i*N*un_raveled_chans:(i+1)*N*un_raveled_chans] = np.ravel(spec)
 
     # IPFB -> FFT
-    print(f"timestream length before trim: {ts.size}")
-    trim = 15000
-    ts = ts[trim:ts.size-trim]
-    # for optimal speed, get this length to be a power of small primes
-    n = int(np.log2(ts.size))
-    ts = ts[:2**n]
-    print(f"timestream length after trim: {ts.size} (2**{n})")
-    
     ffted = np.fft.rfft(ts)/ts.size
     
     # pick out orbcomm channs
@@ -69,6 +60,19 @@ def get_isolated_ffts(data, chans, fi, ff, N=20000):
     ffted[ff:] = 0
 
     return ffted
+
+def get_corr(timestreams, chans, fi, ff, ipfb_chunk):
+    """
+    Get timestream correlation of the two timestreams.
+    
+    -timestreams: a tuple of timestream data. Should be same length and from same frequencies.
+    -chans: channels which the timestreams are from. Should be in the header of the beaseband files.
+    -fi/ff: initial/final frequency to consider, in Hz. All else is zeroed before correlation.
+    -ipfb_chunk: chunk size for the IPFB computation. Should be a multiple of ntap (4)
+    """
+
+    return np.fft.irfft(get_isolated_ffts(timestreams[0], chans, fi, ff, N=ipfb_chunk)*np.conj(get_isolated_ffts(timestreams[1], chans, fi, ff, N=ipfb_chunk)))
+    
 
 if __name__ == "__main__":
 
@@ -80,7 +84,7 @@ if __name__ == "__main__":
     print("unpacked")
 
     skip = 0
-    n_samples = 1001004
+    n_samples = 40*10000
 
     pol0 = pol0[skip:n_samples+skip]
     pol1 = pol1[skip:n_samples+skip]
@@ -91,14 +95,40 @@ if __name__ == "__main__":
     fi = int(1.5006e7)
     ff = int(1.5034e7)
 
-    chunk_n = 100100
+    ipfb_chunk = 4*10000
     
-    # correlate the pols
-    corr = np.fft.irfft(get_isolated_ffts(pol0, chans, fi, ff, N=chunk_n)*np.conj(get_isolated_ffts(pol1, chans, fi, ff, N=chunk_n)))
+    # set up multiprocessing
+    cpus = cpu_count()
+    pool = Pool(cpus)
+    
+    N = pol0.shape[0]
+    
+    # want [cpus] chunks, each a power of 2 long (guaranteeing divisible by ntap (4))
+    nominal_chunk_size = N / cpus
+    chunk_size = 2**int(np.log2(nominal_chunk_size))
+    
+    pol0 = pol0[:cpus*chunk_size]
+    pol1 = pol1[:cpus*chunk_size]
+    
+    print(pol0.shape)
+
+    corr = np.zeros((cpus*chunk_size))
+
+    pol0 = pol0.reshape((cpus,chunk_size,chans.size))
+    pol1 = pol1.reshape((cpus,chunk_size,chans.size))
+
+    for i in range(cpus):
+        corr += pool.starmap_async(get_corr, [((pol0[i], pol1[i]), chans, fi, ff, ipfb_chunk) for x in pol0]).get()
+
+    pool.close()
+    pool.join()
+
+    print(corr)
+        
     # centre the peak
     N = corr.size
     corr = np.hstack((corr[N//2:], corr[:N//2]))
     dt = 1/(250e6)
     ts = np.linspace(0,N*dt,N) - N/2*dt
 
-    np.save(f"$SCRATCH/timing_data/xcorr_lab_{n_samples}samples_{skip}skip", corr)
+    np.save(f"$SCRATCH/timing_data/xcorr_lab_{n_samples}samples_parr", corr)
