@@ -45,11 +45,12 @@ def get_isolated_ffts(data, chans, fi, ff, N=20000):
     for i in range(data.shape[0]//N+1):
         # zfill unmentioned channels
 
-        zfilled = np.zeros((min(N, pol0.shape[0]-i*N),2049), dtype=np.complex64)
+        zfilled = np.zeros((min(N, data.shape[0]-i*N),2049), dtype=np.complex64)
         if zfilled.shape[0] < ntap:
             continue
-        zfilled[:,chans]=pol0[i*N:(i+1)*N]
+        zfilled[:,chans]=data[i*N:(i+1)*N]
         spec = inverse_pfb_fft_filt(zfilled, ntap, thresh=0.1)
+
         ts[i*N*un_raveled_chans:(i+1)*N*un_raveled_chans] = np.ravel(spec)
 
     # IPFB -> FFT
@@ -110,18 +111,17 @@ if __name__ == "__main__":
     pol0 = pol0[:cpus*chunk_size]
     pol1 = pol1[:cpus*chunk_size]
     
-    print(pol0.shape)
-
-    corr = np.zeros((cpus*chunk_size))
+    corr = np.zeros(pol0.size)
 
     pol0 = pol0.reshape((cpus,chunk_size,chans.size))
     pol1 = pol1.reshape((cpus,chunk_size,chans.size))
 
-    print(pol0.shape)
-    print(pol0[0].shape)
+    print(corr.shape)
 
     for i in range(cpus):
         corr += pool.starmap_async(get_corr, [((pol0[i], pol1[i]), chans, fi, ff, ipfb_chunk) for x in pol0]).get()
+    
+    print(corr.shape)
 
     pool.close()
     pool.join()
@@ -134,6 +134,6 @@ if __name__ == "__main__":
     dt = 1/(250e6)
     ts = np.linspace(0,N*dt,N) - N/2*dt
 
-    name = f"$SCRATCH/timing_data/xcorr_lab_{n_samples}samples_parr"
+    name = f"data/xcorr_lab_{n_samples}samples_parr"
     print(f"saving data at {name}")
     np.save(name, corr)
