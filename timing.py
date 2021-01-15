@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 import albatrostools
 import read_4bit
 import pfb_helper as pfb
-from multiprocessing import Pool, set_start_method, get_context, cpu_count
 
 import matplotlib as mpl
 mpl.rcParams['agg.path.chunksize'] = 10000
@@ -43,14 +42,14 @@ def get_isolated_ffts(data, chans, fi, ff, N=20000):
     
     # work in chunks
     for i in range(data.shape[0]//N+1):
-        # zfill unmentioned channels
 
+        # zfill unmentioned channels
         zfilled = np.zeros((min(N, data.shape[0]-i*N),2049), dtype=np.complex64)
         if zfilled.shape[0] < ntap:
             continue
+
         zfilled[:,chans]=data[i*N:(i+1)*N]
         spec = inverse_pfb_fft_filt(zfilled, ntap, thresh=0.1)
-
         ts[i*N*un_raveled_chans:(i+1)*N*un_raveled_chans] = np.ravel(spec)
 
     # IPFB -> FFT
@@ -85,7 +84,7 @@ if __name__ == "__main__":
     print("unpacked")
 
     skip = 0
-    n_samples = 40*100
+    n_samples = 40*1000
 
     pol0 = pol0[skip:n_samples+skip]
     pol1 = pol1[skip:n_samples+skip]
@@ -96,44 +95,26 @@ if __name__ == "__main__":
     fi = int(1.5006e7)
     ff = int(1.5034e7)
 
-    ipfb_chunk = 4*10000
-    
-    # set up multiprocessing
-    cpus = cpu_count()
-    pool = Pool(cpus)
-    
+    ipfb_chunk = 4*1000
+    ifft_chunk = 2**13
+
     N = pol0.shape[0]
-    
-    # want [cpus] chunks, each a power of 2 long (guaranteeing divisible by ntap (4))
-    nominal_chunk_size = N / cpus
-    chunk_size = 2**int(np.log2(nominal_chunk_size))
-    
-    pol0 = pol0[:cpus*chunk_size]
-    pol1 = pol1[:cpus*chunk_size]
+
+    # trim to integer chunk count
+    pol0 = pol0[:N-N%ifft_chunk]
+    pol1 = pol1[:N-N%ifft_chunk]
     
     corr = np.zeros(pol0.size)
 
-    pol0 = pol0.reshape((cpus,chunk_size,chans.size))
-    pol1 = pol1.reshape((cpus,chunk_size,chans.size))
-
-    print(corr.shape)
-
-    for i in range(cpus):
-        corr += pool.starmap_async(get_corr, [((pol0[i], pol1[i]), chans, fi, ff, ipfb_chunk) for x in pol0]).get()
+    for i in range(pol0.shape[0]//ifft_chunk):
+        corr += get_corr((pol0[i*ifft_chunk:(i+1)*ifft_chunk], pol1[i*ifft_chunk:(i+1)*ifft_chunk]), chans, fi, ff, ipfb_chunk)
     
-    print(corr.shape)
-
-    pool.close()
-    pool.join()
-
-    print(corr)
-        
     # centre the peak
     N = corr.size
     corr = np.hstack((corr[N//2:], corr[:N//2]))
     dt = 1/(250e6)
     ts = np.linspace(0,N*dt,N) - N/2*dt
 
-    name = f"data/xcorr_lab_{n_samples}samples_parr"
+    name = f"data/xcorr_lab_{n_samples}samples_agg"
     print(f"saving data at {name}")
     np.save(name, corr)
