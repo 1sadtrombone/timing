@@ -52,34 +52,32 @@ def get_isolated_ffts(data, chans, fi, ff, N=20000):
         spec = inverse_pfb_fft_filt(zfilled, ntap, thresh=0.1)
         ts[i*N*un_raveled_chans:(i+1)*N*un_raveled_chans] = np.ravel(spec)
 
+        
     # IPFB -> FFT
     ffted = np.fft.rfft(ts)/ts.size
     
     # pick out orbcomm channs
-    ffted[:fi] = 0
-    ffted[ff:] = 0
-
-    return ffted
-
-def get_corr(timestreams, chans, fi, ff, ipfb_chunk):
-    """
-    Get timestream correlation of the two timestreams.
+    # boxcar:
+    #ffted[:fi] = 0
+    #ffted[ff:] = 0
     
-    -timestreams: a tuple of timestream data. Should be same length and from same frequencies.
-    -chans: channels which the timestreams are from. Should be in the header of the beaseband files.
-    -fi/ff: initial/final frequency to consider, in Hz. All else is zeroed before correlation.
-    -ipfb_chunk: chunk size for the IPFB computation. Should be a multiple of ntap (4)
-    """
+    # gaussian:
+    fwhm = ff - fi
+    mu = (ff + fi)/2
+    sig = fwhm / (2*np.sqrt(2*np.log(2)))
+    xs = np.arange(ffted.size)
+    gauss_window = 1/(sig*np.sqrt(2*np.pi))*np.exp(-(xs-mu)**2/(2*sig**2))
 
-    return np.fft.irfft(get_isolated_ffts(timestreams[0], chans, fi, ff, N=ipfb_chunk)*np.conj(get_isolated_ffts(timestreams[1], chans, fi, ff, N=ipfb_chunk)))
-    
+    ffted = ffted * gauss_window
+
+    return ffted    
 
 if __name__ == "__main__":
 
     # get PFB'ed data
     print(f"working on: {fname}")
     #header, data = albatrostools.get_data(f"{data_dir}{fname}", items=-1, unpack_fast=True, float=True)
-    # need to use the old read 4bit code (direct grumbles to Nivek)
+    # need to use the old read 4bit code (direct grumbles to Nivek
     pol0, pol1 = read_4bit.read_4bit_new(f"{data_dir}{fname}")
     print("unpacked")
 
@@ -92,22 +90,46 @@ if __name__ == "__main__":
     chans = read_4bit.read_header(f"{data_dir}{fname}")['chans']
 
     # eyeballed, second peak from left (seems clearly defined)
-    fi = int(1.5006e7)
-    ff = int(1.5034e7)
+    #fi = int(1.5006e7)
+    #ff = int(1.5034e7)
+
+    # odd, it seems to have drastically shifted... chose third from left this time
+    fi = int(7.531e6)
+    ff = int(7.543e6)
 
     ipfb_chunk = 4*1000
-    ifft_chunk = 2**13
-
-    N = pol0.shape[0]
+    ifft_chunk = 2**12
 
     # trim to integer chunk count
-    pol0 = pol0[:N-N%ifft_chunk]
-    pol1 = pol1[:N-N%ifft_chunk]
+    pol0 = pol0[:n_samples-n_samples%ifft_chunk]
+    pol1 = pol1[:n_samples-n_samples%ifft_chunk]
+
+    print('pol0 trimmed again')
+    print(pol0.shape)
     
-    corr = np.zeros(pol0.size)
+    corr = np.zeros(2*ifft_chunk*2048)
+
+    print('corr created')
+    print(corr.shape)
 
     for i in range(pol0.shape[0]//ifft_chunk):
-        corr += get_corr((pol0[i*ifft_chunk:(i+1)*ifft_chunk], pol1[i*ifft_chunk:(i+1)*ifft_chunk]), chans, fi, ff, ipfb_chunk)
+        print(f'iteration {i}')
+
+        pol0_fft = get_isolated_ffts(pol0[i*ifft_chunk:(i+1)*ifft_chunk], chans, fi, ff, N=ipfb_chunk)
+        pol1_fft = get_isolated_ffts(pol1[i*ifft_chunk:(i+1)*ifft_chunk], chans, fi, ff, N=ipfb_chunk)
+
+        # TODO: Gaussian trim in Fourier space
+
+        # TODO: recentre ORBCOMM peak near 0
+        cen = int((ff + fi)/2)
+        r = ff - cen
+        pol0_fft[:4*r] = pol0_fft[cen-2*r:cen+2*r]
+        pol0_fft[cen-2*r:cen+2*r] = 0
+        pol1_fft[:4*r] = pol1_fft[cen-2*r:cen+2*r]
+        pol1_fft[cen-2*r:cen+2*r] = 0
+
+        add = np.fft.irfft(pol0_fft*np.conj(pol1_fft))
+        corr += add
     
     # centre the peak
     N = corr.size
@@ -115,6 +137,6 @@ if __name__ == "__main__":
     dt = 1/(250e6)
     ts = np.linspace(0,N*dt,N) - N/2*dt
 
-    name = f"data/xcorr_lab_{n_samples}samples_agg"
+    name = f"data/xcorr_lab_gauss_window"
     print(f"saving data at {name}")
     np.save(name, corr)
