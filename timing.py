@@ -39,8 +39,11 @@ def get_isolated_ffts(data, chans, fi, ff, N=20000):
     un_raveled_chans = 4096
     ntap = 4
     ts = np.zeros(data.shape[0]*un_raveled_chans, dtype=np.float64)    
+
+    print("incoming PFBed data")
+    print(data.shape)
     
-    # work in chunks
+    # zfill in chunks
     for i in range(data.shape[0]//N+1):
 
         # zfill unmentioned channels
@@ -55,21 +58,15 @@ def get_isolated_ffts(data, chans, fi, ff, N=20000):
         
     # IPFB -> FFT
     ffted = np.fft.rfft(ts)/ts.size
-    
+    print("ffted")
+    print(ffted.shape)
+
     # pick out orbcomm channs
+
     # boxcar:
     #ffted[:fi] = 0
     #ffted[ff:] = 0
     
-    # gaussian:
-    fwhm = ff - fi
-    mu = (ff + fi)/2
-    sig = fwhm / (2*np.sqrt(2*np.log(2)))
-    xs = np.arange(ffted.size)
-    gauss_window = 1/(sig*np.sqrt(2*np.pi))*np.exp(-(xs-mu)**2/(2*sig**2))
-
-    ffted = ffted * gauss_window
-
     return ffted    
 
 if __name__ == "__main__":
@@ -107,7 +104,7 @@ if __name__ == "__main__":
     print('pol0 trimmed again')
     print(pol0.shape)
     
-    corr = np.zeros(2*ifft_chunk*2048)
+    corr = np.zeros(ifft_chunk*2048+1, dtype=np.complex128)
 
     print('corr created')
     print(corr.shape)
@@ -118,25 +115,27 @@ if __name__ == "__main__":
         pol0_fft = get_isolated_ffts(pol0[i*ifft_chunk:(i+1)*ifft_chunk], chans, fi, ff, N=ipfb_chunk)
         pol1_fft = get_isolated_ffts(pol1[i*ifft_chunk:(i+1)*ifft_chunk], chans, fi, ff, N=ipfb_chunk)
 
-        # TODO: Gaussian trim in Fourier space
-
-        # TODO: recentre ORBCOMM peak near 0
-        cen = int((ff + fi)/2)
-        r = ff - cen
-        pol0_fft[:4*r] = pol0_fft[cen-2*r:cen+2*r]
-        pol0_fft[cen-2*r:cen+2*r] = 0
-        pol1_fft[:4*r] = pol1_fft[cen-2*r:cen+2*r]
-        pol1_fft[cen-2*r:cen+2*r] = 0
-
-        add = np.fft.irfft(pol0_fft*np.conj(pol1_fft))
+        add = pol0_fft*np.conj(pol1_fft)
         corr += add
-    
+
+    """
+    # gaussian:
+    fwhm = ff - fi
+    mu = (ff + fi)/2
+    sig = fwhm / (2*np.sqrt(2*np.log(2)))
+    xs = np.arange(ffted.size)
+    gauss_window = 1/(sig*np.sqrt(2*np.pi))*np.exp(-(xs-mu)**2/(2*sig**2))
+
+    ffted = ffted * gauss_window
+    """
+    """
     # centre the peak
-    N = corr.size
-    corr = np.hstack((corr[N//2:], corr[:N//2]))
+    N = phase.size
+    phase = np.hstack((phase[N//2:], phase[:N//2]))
     dt = 1/(250e6)
     ts = np.linspace(0,N*dt,N) - N/2*dt
+    """
 
-    name = f"data/xcorr_lab_gauss_window"
+    name = f"data/xcorr_lab_fspace"
     print(f"saving data at {name}")
     np.save(name, corr)
