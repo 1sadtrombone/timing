@@ -55,7 +55,7 @@ def get_isolated_ffts(data, chans, fi, ff, N=20000):
         spec = inverse_pfb_fft_filt(zfilled, ntap, thresh=0.1)
         ts[i*N*un_raveled_chans:(i+1)*N*un_raveled_chans] = np.ravel(spec)
 
-        
+
     # IPFB -> FFT
     ffted = np.fft.rfft(ts)/ts.size
     print("ffted")
@@ -79,7 +79,7 @@ if __name__ == "__main__":
     print("unpacked")
 
     skip = 0
-    n_samples = 40*1000
+    n_samples = 40*10000
 
     pol0 = pol0[skip:n_samples+skip]
     pol1 = pol1[skip:n_samples+skip]
@@ -104,7 +104,9 @@ if __name__ == "__main__":
     print('pol0 trimmed again')
     print(pol0.shape)
     
-    corr = np.zeros(ifft_chunk*2048+1, dtype=np.complex128)
+    corr = np.zeros((pol0.shape[0]//ifft_chunk, ifft_chunk*2048+1), dtype=np.complex128)
+    pol0_fft = np.zeros((pol0.shape[0]//ifft_chunk, ifft_chunk*2048+1), dtype=np.complex128)
+    pol1_fft = np.zeros((pol0.shape[0]//ifft_chunk, ifft_chunk*2048+1), dtype=np.complex128)
 
     print('corr created')
     print(corr.shape)
@@ -112,22 +114,23 @@ if __name__ == "__main__":
     for i in range(pol0.shape[0]//ifft_chunk):
         print(f'iteration {i}')
 
-        pol0_fft = get_isolated_ffts(pol0[i*ifft_chunk:(i+1)*ifft_chunk], chans, fi, ff, N=ipfb_chunk)
-        pol1_fft = get_isolated_ffts(pol1[i*ifft_chunk:(i+1)*ifft_chunk], chans, fi, ff, N=ipfb_chunk)
+        pol0_fft[i] = get_isolated_ffts(pol0[i*ifft_chunk:(i+1)*ifft_chunk], chans, fi, ff, N=ipfb_chunk)
+        pol1_fft[i] = get_isolated_ffts(pol1[i*ifft_chunk:(i+1)*ifft_chunk], chans, fi, ff, N=ipfb_chunk)
+        
+        #add = pol0_fft*np.conj(pol1_fft)
+        #corr[i] = add
 
-        add = pol0_fft*np.conj(pol1_fft)
-        corr += add
 
-    """
     # gaussian:
     fwhm = ff - fi
     mu = (ff + fi)/2
     sig = fwhm / (2*np.sqrt(2*np.log(2)))
-    xs = np.arange(ffted.size)
+    xs = np.arange(corr.shape[1])
     gauss_window = 1/(sig*np.sqrt(2*np.pi))*np.exp(-(xs-mu)**2/(2*sig**2))
 
-    ffted = ffted * gauss_window
-    """
+    pol0_fft = pol0_fft * gauss_window
+    pol1_fft = pol1_fft * gauss_window
+
     """
     # centre the peak
     N = phase.size
@@ -136,6 +139,9 @@ if __name__ == "__main__":
     ts = np.linspace(0,N*dt,N) - N/2*dt
     """
 
-    name = f"data/xcorr_lab_fspace"
-    print(f"saving data at {name}")
-    np.save(name, corr)
+    name = f"data/lab_timestream_with_errors_{pol0.shape[0]//ifft_chunk}chunks"
+    print(f"saving data at {name}_pol0")
+    np.save(f"{name}_pol0", (xs, np.mean(pol0_fft, axis=0), np.std(pol0_fft, axis=0)))
+
+    print(f"saving data at {name}_pol1")
+    np.save(f"{name}_pol1", (xs, np.mean(pol1_fft, axis=0), np.std(pol1_fft, axis=0)))
