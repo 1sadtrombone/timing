@@ -128,8 +128,10 @@ if __name__ == "__main__":
     xs = np.arange(corr.shape[1])
     gauss_window = 1/(sig*np.sqrt(2*np.pi))*np.exp(-(xs-mu)**2/(2*sig**2))
 
+    """
     pol0_fft = pol0_fft * gauss_window
     pol1_fft = pol1_fft * gauss_window
+    """
 
     """
     # centre the peak
@@ -139,9 +141,9 @@ if __name__ == "__main__":
     ts = np.linspace(0,N*dt,N) - N/2*dt
     """
 
-    name = f"data/lab_timestream_with_errors_{pol0.shape[0]//ifft_chunk}chunks"
+    name = f"data/lab_timestream_with_errors_{pol0.shape[0]//ifft_chunk}chunks_notfiltered_uncollapsed"
     print(f"saving data at {name}_pol0")
-    np.save(f"{name}_pol0", (xs, np.mean(pol0_fft, axis=0), np.std(pol0_fft, axis=0)))
+    np.save(f"{name}_pol0", pol0_fft)
 
     print(f"saving data at {name}_pol1")
-    np.save(f"{name}_pol1", (xs, np.mean(pol1_fft, axis=0), np.std(pol1_fft, axis=0)))
+    np.save(f"{name}_pol1", pol1_fft)
