@@ -7,12 +7,6 @@ import pfb_helper as pfb
 import matplotlib as mpl
 mpl.rcParams['agg.path.chunksize'] = 10000
 
-fname = "935278854.raw"
-data_dir = "/project/s/sievers/sievers/albatros/lab_baseband/orbcomm/"
-
-#corrs = albatrostools.correlate(data['pol0'], data['pol1'])
-#corrs = albatrostools.bin_crosses(data['pol0'], data['pol1'], chunk=4096)
-
 def inverse_pfb_fft_filt(dat,ntap,window=pfb.sinc_hamming,thresh=0.0):
     dd=np.fft.irfft(dat,axis=1)
     win=window(ntap,dd.shape[1])
@@ -71,18 +65,60 @@ def get_isolated_ffts(data, chans, fi, ff, N=20000):
 
 if __name__ == "__main__":
 
-    # get PFB'ed data
-    print(f"working on: {fname}")
-    #header, data = albatrostools.get_data(f"{data_dir}{fname}", items=-1, unpack_fast=True, float=True)
-    # need to use the old read 4bit code (direct grumbles to Nivek
-    pol0, pol1 = read_4bit.read_4bit_new(f"{data_dir}{fname}")
+    dataset = 'gault'
+    print(dataset)
+
+    # get PFB'ed dat
+
+    if dataset == "lab":
+        
+        fname = "935278854.raw"
+        data_dir = "/project/s/sievers/sievers/albatros/lab_baseband/orbcomm/"
+        print(f"working on: {data_dir}{fname}")
+        # need to use the old read 4bit code (direct grumbles to Nivek
+        sig0, sig1 = read_4bit.read_4bit_new(f"{data_dir}{fname}")
+        header = read_4bit.read_header(f"{data_dir}{fname}")
+
+    if dataset == "gault":
+
+        fname = "16184/1618433016.raw"
+        data_dir = "/project/s/sievers/tristanm/MontStHilaire/"
+
+        print(f"working on: {data_dir}{fname}")
+        header, data = albatrostools.get_data(f"{data_dir}{fname}", items=-1, unpack_fast=True, float=True)
+        sig0 = data['pol0']
+        sig1 = data['pol1']
+        
+    if dataset == "uapishka":
+        fname_ant0 = "snap1/16272/1627271677.raw"
+        fname_ant1 = "snap3/16272/1627271677.raw" # the most recent file where the names lined up for the two stations
+        data_dir = "/project/s/sievers/albatros/uapishka/baseband"
+        
+        fnames = [fname_ant0, fname_ant1]
+        
+        for i, fname in enumerate(fnames):
+            print(f"working on: {data_dir}{fname}")
+            header, data = albatrostools.get_data(f"{data_dir}{fname}", items=-1, unpack_fast=True, float=True)
+            ant_data[i,0] = data['pol0']
+            ant_data[i,1] = data['pol1']
+            
+        # choose which signals to compare (antenna, polarization)
+        sig0 = ant_data[0,0]
+        sig1 = ant_data[1,0]
+    
     print("unpacked")
+    
+
+    #plt.imshow(np.real(pol0), aspect='auto', interpolation='none')
+    plt.plot(np.abs(np.sum(sig0, axis=0)))
+    plt.show()
+    exit()
 
     skip = 0
     n_samples = 40*10000
 
-    pol0 = pol0[skip:n_samples+skip]
-    pol1 = pol1[skip:n_samples+skip]
+    sig0 = sig0[skip:n_samples+skip]
+    sig1 = sig1[skip:n_samples+skip]
 
     chans = read_4bit.read_header(f"{data_dir}{fname}")['chans']
 
@@ -98,26 +134,26 @@ if __name__ == "__main__":
     ifft_chunk = 2**12
 
     # trim to integer chunk count
-    pol0 = pol0[:n_samples-n_samples%ifft_chunk]
-    pol1 = pol1[:n_samples-n_samples%ifft_chunk]
+    sig0 = sig0[:n_samples-n_samples%ifft_chunk]
+    sig1 = sig1[:n_samples-n_samples%ifft_chunk]
 
-    print('pol0 trimmed again')
-    print(pol0.shape)
+    print('sig0 trimmed again')
+    print(sig0.shape)
     
-    corr = np.zeros((pol0.shape[0]//ifft_chunk, ifft_chunk*2048+1), dtype=np.complex128)
-    pol0_fft = np.zeros((pol0.shape[0]//ifft_chunk, ifft_chunk*2048+1), dtype=np.complex128)
-    pol1_fft = np.zeros((pol0.shape[0]//ifft_chunk, ifft_chunk*2048+1), dtype=np.complex128)
+    corr = np.zeros((sig0.shape[0]//ifft_chunk, ifft_chunk*2048+1), dtype=np.complex128)
+    sig0_fft = np.zeros((sig0.shape[0]//ifft_chunk, ifft_chunk*2048+1), dtype=np.complex128)
+    sig1_fft = np.zeros((sig0.shape[0]//ifft_chunk, ifft_chunk*2048+1), dtype=np.complex128)
 
     print('corr created')
     print(corr.shape)
 
-    for i in range(pol0.shape[0]//ifft_chunk):
+    for i in range(sig0.shape[0]//ifft_chunk):
         print(f'iteration {i}')
 
-        pol0_fft[i] = get_isolated_ffts(pol0[i*ifft_chunk:(i+1)*ifft_chunk], chans, fi, ff, N=ipfb_chunk)
-        pol1_fft[i] = get_isolated_ffts(pol1[i*ifft_chunk:(i+1)*ifft_chunk], chans, fi, ff, N=ipfb_chunk)
+        sig0_fft[i] = get_isolated_ffts(sig0[i*ifft_chunk:(i+1)*ifft_chunk], chans, fi, ff, N=ipfb_chunk)
+        sig1_fft[i] = get_isolated_ffts(sig1[i*ifft_chunk:(i+1)*ifft_chunk], chans, fi, ff, N=ipfb_chunk)
         
-        #add = pol0_fft*np.conj(pol1_fft)
+        #add = sig0_fft*np.conj(sig1_fft)
         #corr[i] = add
 
 
@@ -129,8 +165,8 @@ if __name__ == "__main__":
     gauss_window = 1/(sig*np.sqrt(2*np.pi))*np.exp(-(xs-mu)**2/(2*sig**2))
 
     """
-    pol0_fft = pol0_fft * gauss_window
-    pol1_fft = pol1_fft * gauss_window
+    sig0_fft = sig0_fft * gauss_window
+    sig1_fft = sig1_fft * gauss_window
     """
 
     """
@@ -141,9 +177,9 @@ if __name__ == "__main__":
     ts = np.linspace(0,N*dt,N) - N/2*dt
     """
 
-    name = f"data/lab_timestream_with_errors_{pol0.shape[0]//ifft_chunk}chunks_notfiltered_uncollapsed"
-    print(f"saving data at {name}_pol0")
-    np.save(f"{name}_pol0", pol0_fft)
+    name = f"data/lab_timestream_with_errors_{sig0.shape[0]//ifft_chunk}chunks_notfiltered_uncollapsed"
+    print(f"saving data at {name}_sig0")
+    np.save(f"{name}_sig0", sig0_fft)
 
-    print(f"saving data at {name}_pol1")
-    np.save(f"{name}_pol1", pol1_fft)
+    print(f"saving data at {name}_sig1")
+    np.save(f"{name}_sig1", sig1_fft)
