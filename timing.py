@@ -9,8 +9,22 @@ mpl.rcParams['agg.path.chunksize'] = 10000
 
 # "DOCUMENTATION"
 # Feed this script the location of two baseband streams
-# It saves .npy file of the 
+# It works in chunks on the pfb'ed baseband
+# getting the fft of each chunk, for each of the two data files.
+# It then saves the average of the ffts (across chunks, as a fct. of frequency)
+# for each data file provided. Standard dev. is similarly saved.
+# The saved .npy files are further processed and plotted in plot_timing.py
 
+# The process may become more clear after looking at the code below
+
+# note: here is not where any correlation happens
+# the files are worked on at the same time for convenience,
+# but no interaction is had between them.
+# The signals are compared in the chi^2 calculation
+# found in plot_timing.py
+
+
+# ipfb function borrowed from scio
 def inverse_pfb_fft_filt(dat,ntap,window=pfb.sinc_hamming,thresh=0.0):
     
     dd=np.fft.irfft(dat,axis=1)
@@ -25,13 +39,12 @@ def inverse_pfb_fft_filt(dat,ntap,window=pfb.sinc_hamming,thresh=0.0):
         ddft=ddft*filt
     return np.fft.irfft(ddft/np.conj(matft),axis=0)
 
-def get_isolated_ffts(data, chans, fi, ff, N=20000):
+def get_zerofilled_ffts(data, chans, N=20000):
     """
-    Get timestream of data if signal from fi to ff only is nonzero
+    Get fft of pfb'ed baseband, while zerofilling all channels without signal in them (instead of simply ignoring them)
     
-    - data: baseband data (which is PFBed). Works best if length is power of small primes
-    - chans: frequency channels associated with this data
-    - fi, ff: initial and final frequencies of the non-zero signal
+    - data: baseband data (which is PFBed). Works best if length is power of small primes (eg 2)
+    - chans: frequency channels with baseband data in them
     - N: chunk size for the IPFB computation
     """
 
@@ -45,7 +58,7 @@ def get_isolated_ffts(data, chans, fi, ff, N=20000):
     # zfill in chunks
     for i in range(data.shape[0]//N+1):
 
-        # zfill unmentioned channels
+        # zfill all unmentioned channels (total 2048, well 2049 for fft ease (ask Jon))
         zfilled = np.zeros((min(N, data.shape[0]-i*N),2049), dtype=np.complex64)
         if zfilled.shape[0] < ntap:
             continue
@@ -59,12 +72,6 @@ def get_isolated_ffts(data, chans, fi, ff, N=20000):
     ffted = np.fft.rfft(ts)/ts.size
     print("ffted")
     print(ffted.shape)
-
-    # pick out orbcomm channs
-
-    # boxcar:
-    #ffted[:fi] = 0
-    #ffted[ff:] = 0
     
     return ffted    
 
@@ -72,8 +79,14 @@ if __name__ == "__main__":
 
     dataset = 'lab'
     print(dataset)
+    
+    name = f"NAME_YOUR_DESTINATION_FILE" # filename to save to
+    print(f'eventually writing to {name} (not yet)')
 
-    # get PFB'ed dat
+    # get PFB'ed data
+    # there are 3 datasets right now. The lab dataset is the only one I've really worked with
+    # uapishka is extra complicated because the two stations save data taken at the same time
+    # under different filenames
 
     if dataset == "lab":
         
@@ -95,8 +108,9 @@ if __name__ == "__main__":
         sig1 = data['pol1']
         
     if dataset == "uapishka":
+        # I haven't figured out the above extra uapishka complication
         fname_ant0 = "snap1/16274/1627429131.raw"
-        fname_ant1 = "snap3/16272/1627271677.raw" # the most recent file where the names lined up for the two stations
+        fname_ant1 = "snap3/16272/1627271677.raw"
         data_dir = "/project/s/sievers/albatros/uapishka/baseband/"
         
         fnames = [fname_ant0, fname_ant1]
@@ -123,7 +137,7 @@ if __name__ == "__main__":
     """
     
     skip = 0 # samples to skip from the beginning of the data
-    n_samples = 40*10000 # no. of samples to keep
+    n_samples = 40*10000 # no. of samples to keep (how big a dataset to work on)
 
     sig0 = sig0[skip:n_samples+skip]
     sig1 = sig1[skip:n_samples+skip]
@@ -143,43 +157,41 @@ if __name__ == "__main__":
 
     print('sig0 trimmed again')
     print(sig0.shape)
+
+    print(f'number of chunks: {sig0.shape[0]//ifft_chunk}')
     
-    corr = np.zeros((sig0.shape[0]//ifft_chunk, ifft_chunk*2048+1), dtype=np.complex128)
+    # dimensions are (N of chunks, N of frequency bins)
     sig0_fft = np.zeros((sig0.shape[0]//ifft_chunk, ifft_chunk*2048+1), dtype=np.complex128)
     sig1_fft = np.zeros((sig0.shape[0]//ifft_chunk, ifft_chunk*2048+1), dtype=np.complex128)
-
-    print('corr created')
-    print(corr.shape)
-
+    
+    # work in chunks on the pfb'ed baseband, ipfb'ing each chunk and putting it in fourier space
+    # that is sig0_fft[n] is the nth chunk as a function of frequency
     for i in range(sig0.shape[0]//ifft_chunk):
         print(f'iteration {i}')
 
-        sig0_fft[i] = get_isolated_ffts(sig0[i*ifft_chunk:(i+1)*ifft_chunk], chans, fi, ff, N=ipfb_chunk)
-        sig1_fft[i] = get_isolated_ffts(sig1[i*ifft_chunk:(i+1)*ifft_chunk], chans, fi, ff, N=ipfb_chunk)
+        sig0_fft[i] = get_zerofilled_ffts(sig0[i*ifft_chunk:(i+1)*ifft_chunk], chans, N=ipfb_chunk)
+        sig1_fft[i] = get_zerofilled_ffts(sig1[i*ifft_chunk:(i+1)*ifft_chunk], chans, N=ipfb_chunk)
 
     # gaussian window to pick out ORBCOMM channels:
     fwhm = ff - fi
     mu = (ff + fi)/2
     sig = fwhm / (2*np.sqrt(2*np.log(2)))
-    xs = np.arange(corr.shape[1])
+    xs = np.arange(sig0_fft.shape[1])
     gauss_window = 1/(sig*np.sqrt(2*np.pi))*np.exp(-(xs-mu)**2/(2*sig**2))
 
-    """
+    # apply window
     sig0_fft = sig0_fft * gauss_window
     sig1_fft = sig1_fft * gauss_window
-    """
 
-    """
-    # centre the peak
-    N = phase.size
-    phase = np.hstack((phase[N//2:], phase[:N//2]))
-    dt = 1/(250e6)
-    ts = np.linspace(0,N*dt,N) - N/2*dt
-    """
+    # save the result to be work on in another script (plot_timing.py)
+    # this above process takes a while, even on modest sized data, thus the saving
 
-    name = f"test"
+    # I save (index, average of all pfb chunks (fct. of freq.), standard deviation of same)
+    # std. dev. across chunks stands in for a better error estimate in the chi^2 calculation
     print(f"saving data at {name}_sig0")
-    np.save(f"{name}_sig0", sig0_fft)
+    np.save(f"{name}_sig0", (xs, np.mean(sig0_fft, axis=0), np.std(sig0_fft, axis=0)))
 
     print(f"saving data at {name}_sig1")
-    np.save(f"{name}_sig1", sig1_fft)
+    np.save(f"{name}_sig1", (xs, np.mean(sig1_fft, axis=0), np.std(sig1_fft, axis=0)))
+    
+    # the story continues in plot_timing.py
