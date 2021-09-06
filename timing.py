@@ -7,7 +7,12 @@ import pfb_helper as pfb
 import matplotlib as mpl
 mpl.rcParams['agg.path.chunksize'] = 10000
 
+# "DOCUMENTATION"
+# Feed this script the location of two baseband streams
+# It saves .npy file of the 
+
 def inverse_pfb_fft_filt(dat,ntap,window=pfb.sinc_hamming,thresh=0.0):
+    
     dd=np.fft.irfft(dat,axis=1)
     win=window(ntap,dd.shape[1])
     win=np.reshape(win,[ntap,len(win)//ntap])
@@ -65,7 +70,7 @@ def get_isolated_ffts(data, chans, fi, ff, N=20000):
 
 if __name__ == "__main__":
 
-    dataset = 'gault'
+    dataset = 'lab'
     print(dataset)
 
     # get PFB'ed dat
@@ -75,7 +80,7 @@ if __name__ == "__main__":
         fname = "935278854.raw"
         data_dir = "/project/s/sievers/sievers/albatros/lab_baseband/orbcomm/"
         print(f"working on: {data_dir}{fname}")
-        # need to use the old read 4bit code (direct grumbles to Nivek
+        # need to use the old read 4bit code (direct grumbles to Nivek)
         sig0, sig1 = read_4bit.read_4bit_new(f"{data_dir}{fname}")
         header = read_4bit.read_header(f"{data_dir}{fname}")
 
@@ -90,12 +95,12 @@ if __name__ == "__main__":
         sig1 = data['pol1']
         
     if dataset == "uapishka":
-        fname_ant0 = "snap1/16272/1627271677.raw"
+        fname_ant0 = "snap1/16274/1627429131.raw"
         fname_ant1 = "snap3/16272/1627271677.raw" # the most recent file where the names lined up for the two stations
-        data_dir = "/project/s/sievers/albatros/uapishka/baseband"
+        data_dir = "/project/s/sievers/albatros/uapishka/baseband/"
         
         fnames = [fname_ant0, fname_ant1]
-        
+        ant_data = np.zeros((2,2), dtype=object)
         for i, fname in enumerate(fnames):
             print(f"working on: {data_dir}{fname}")
             header, data = albatrostools.get_data(f"{data_dir}{fname}", items=-1, unpack_fast=True, float=True)
@@ -108,30 +113,29 @@ if __name__ == "__main__":
     
     print("unpacked")
     
-
-    #plt.imshow(np.real(pol0), aspect='auto', interpolation='none')
-    plt.plot(np.abs(np.sum(sig0, axis=0)))
+    # to have a quick look at the data:
+    """
+    plt.imshow(np.real(sig0), aspect='auto', interpolation='none')
+    plt.figure()
+    plt.plot(np.median(np.abs(sig0), axis=0))
     plt.show()
     exit()
-
-    skip = 0
-    n_samples = 40*10000
+    """
+    
+    skip = 0 # samples to skip from the beginning of the data
+    n_samples = 40*10000 # no. of samples to keep
 
     sig0 = sig0[skip:n_samples+skip]
     sig1 = sig1[skip:n_samples+skip]
 
     chans = read_4bit.read_header(f"{data_dir}{fname}")['chans']
 
-    # eyeballed, second peak from left (seems clearly defined)
-    #fi = int(1.5006e7)
-    #ff = int(1.5034e7)
-
-    # odd, it seems to have drastically shifted... chose third from left this time
+    # pick out one orbcomm channel. acheived by looking. this one works for the lab data
     fi = int(7.531e6)
     ff = int(7.543e6)
 
     ipfb_chunk = 4*1000
-    ifft_chunk = 2**12
+    ifft_chunk = 2**12 # powers of 2 are best
 
     # trim to integer chunk count
     sig0 = sig0[:n_samples-n_samples%ifft_chunk]
@@ -152,12 +156,8 @@ if __name__ == "__main__":
 
         sig0_fft[i] = get_isolated_ffts(sig0[i*ifft_chunk:(i+1)*ifft_chunk], chans, fi, ff, N=ipfb_chunk)
         sig1_fft[i] = get_isolated_ffts(sig1[i*ifft_chunk:(i+1)*ifft_chunk], chans, fi, ff, N=ipfb_chunk)
-        
-        #add = sig0_fft*np.conj(sig1_fft)
-        #corr[i] = add
 
-
-    # gaussian:
+    # gaussian window to pick out ORBCOMM channels:
     fwhm = ff - fi
     mu = (ff + fi)/2
     sig = fwhm / (2*np.sqrt(2*np.log(2)))
@@ -177,7 +177,7 @@ if __name__ == "__main__":
     ts = np.linspace(0,N*dt,N) - N/2*dt
     """
 
-    name = f"data/lab_timestream_with_errors_{sig0.shape[0]//ifft_chunk}chunks_notfiltered_uncollapsed"
+    name = f"test"
     print(f"saving data at {name}_sig0")
     np.save(f"{name}_sig0", sig0_fft)
 
